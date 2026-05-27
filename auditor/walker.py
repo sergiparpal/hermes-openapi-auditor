@@ -18,9 +18,29 @@ from .model import Spec
 _HTTP_VERBS = frozenset({"get", "post", "put", "patch", "delete", "options", "head", "trace"})
 
 
-def encode_pointer_segment(segment: str) -> str:
-    """RFC 6901 escape a single pointer segment."""
-    return segment.replace("~", "~0").replace("/", "~1")
+def encode_pointer_segment(segment: Any) -> str:
+    """RFC 6901 escape a single pointer segment.
+
+    Accepts any value so the caller doesn't have to coerce YAML dict
+    keys that PyYAML may have parsed as non-strings (e.g. bare ``on:``
+    becomes ``True`` under YAML 1.1, bare ``42:`` becomes ``int``).
+    """
+    return str(segment).replace("~", "~0").replace("/", "~1")
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    """Return ``value`` unchanged if it's a dict, else an empty dict.
+
+    Used to make every traversal site null-safe in the common case where
+    a YAML key is present but its value is ``null`` (e.g. ``paths:`` on a
+    line by itself), which would otherwise crash ``.items()``.
+    """
+    return value if isinstance(value, dict) else {}
+
+
+def _as_list(value: Any) -> list[Any]:
+    """Return ``value`` unchanged if it's a list, else an empty list."""
+    return value if isinstance(value, list) else []
 
 
 def iter_operations(spec: Spec) -> Iterator[tuple[str, str, dict[str, Any], str]]:
@@ -29,11 +49,26 @@ def iter_operations(spec: Spec) -> Iterator[tuple[str, str, dict[str, Any], str]
     Path-level shared parameters (``parameters`` keyed on a path item) are
     merged into each operation's parameter list so rules can treat each
     operation as self-contained. Verbs are returned lowercased.
+
+    For OpenAPI 3.1, top-level ``webhooks`` are iterated as a second pass
+    with pointer prefix ``#/webhooks/`` (3.0 and 2.0 have no webhooks).
     """
-    for path, path_item in spec.data.get("paths", {}).items():
+    yield from _iter_path_items_section(_as_dict(spec.data.get("paths")), prefix="#/paths/")
+    if spec.version == "3.1":
+        yield from _iter_path_items_section(
+            _as_dict(spec.data.get("webhooks")), prefix="#/webhooks/"
+        )
+
+
+def _iter_path_items_section(
+    section: dict[str, Any],
+    *,
+    prefix: str,
+) -> Iterator[tuple[str, str, dict[str, Any], str]]:
+    for path, path_item in section.items():
         if not isinstance(path_item, dict):
             continue
-        shared_params = path_item.get("parameters", [])
+        shared_params = _as_list(path_item.get("parameters"))
         for verb, op in path_item.items():
             if verb not in _HTTP_VERBS:
                 continue
@@ -42,9 +77,9 @@ def iter_operations(spec: Spec) -> Iterator[tuple[str, str, dict[str, Any], str]
             merged = dict(op)
             if shared_params:
                 merged_params = list(shared_params)
-                merged_params.extend(op.get("parameters", []))
+                merged_params.extend(_as_list(op.get("parameters")))
                 merged["parameters"] = merged_params
-            pointer = f"#/paths/{encode_pointer_segment(path)}/{verb}"
+            pointer = f"{prefix}{encode_pointer_segment(path)}/{verb}"
             yield path, verb, merged, pointer
 
 
@@ -57,7 +92,7 @@ def iter_responses(
     ``operation.responses`` keyed by status code (``"200"``, ``"4XX"``,
     ``"default"``).
     """
-    for status, response in operation.get("responses", {}).items():
+    for status, response in _as_dict(operation.get("responses")).items():
         if isinstance(response, dict):
             yield str(status), response
 
@@ -80,14 +115,14 @@ def iter_request_bodies(
         body_param = next(
             (
                 p
-                for p in operation.get("parameters", [])
+                for p in _as_list(operation.get("parameters"))
                 if isinstance(p, dict) and p.get("in") == "body"
             ),
             None,
         )
         if body_param is None:
             return
-        consumes = operation.get("consumes") or spec.data.get("consumes") or []
+        consumes = _as_list(operation.get("consumes")) or _as_list(spec.data.get("consumes"))
         media_type = consumes[0] if consumes else "application/json"
         yield media_type, {"schema": body_param.get("schema", {})}
         return
@@ -95,7 +130,7 @@ def iter_request_bodies(
     request_body = operation.get("requestBody")
     if not isinstance(request_body, dict):
         return
-    for media_type, media in request_body.get("content", {}).items():
+    for media_type, media in _as_dict(request_body.get("content")).items():
         if isinstance(media, dict):
             yield media_type, media
 
@@ -107,16 +142,14 @@ def iter_schemas(spec: Spec) -> Iterator[tuple[str, dict[str, Any], str]]:
     to ``components.schemas``. The walker hides the difference.
     """
     if spec.version == "2.0":
-        for name, schema in spec.data.get("definitions", {}).items():
+        for name, schema in _as_dict(spec.data.get("definitions")).items():
             if isinstance(schema, dict):
                 pointer = f"#/definitions/{encode_pointer_segment(name)}"
                 yield name, schema, pointer
         return
 
-    components = spec.data.get("components", {})
-    if not isinstance(components, dict):
-        return
-    for name, schema in components.get("schemas", {}).items():
+    components = _as_dict(spec.data.get("components"))
+    for name, schema in _as_dict(components.get("schemas")).items():
         if isinstance(schema, dict):
             pointer = f"#/components/schemas/{encode_pointer_segment(name)}"
             yield name, schema, pointer
@@ -125,25 +158,104 @@ def iter_schemas(spec: Spec) -> Iterator[tuple[str, dict[str, Any], str]]:
 def iter_all_schemas(spec: Spec) -> Iterator[tuple[dict[str, Any], str]]:
     """Yield every schema-shaped dict reachable from the spec.
 
-    Walks reusable schemas (``definitions`` / ``components.schemas``)
-    plus every operation-embedded schema (parameter ``schema`` objects,
-    request body media types, response bodies) and recurses into
-    composition keywords (``properties``, ``items``, ``allOf``,
-    ``oneOf``, ``anyOf``, ``not``, ``additionalProperties``,
-    ``patternProperties``).
+    Walks reusable schemas (``definitions`` / ``components.schemas``),
+    then other reusable component sections (``components.parameters``,
+    ``components.headers``, ``components.responses``,
+    ``components.requestBodies``; for 2.0 the top-level ``parameters``
+    and ``responses``), then every operation-embedded schema (parameter
+    ``schema`` / ``content`` objects, request body media types, response
+    bodies, response headers).
 
-    Identity-tracks already-yielded schemas so circular ``$ref``
-    structures (when ``resolve_refs=True`` produced shared dict
-    instances) do not cause infinite recursion. Each unique dict is
-    yielded exactly once, at the first pointer where it is encountered.
+    Visit order matters for dedup-by-id: canonical reusable locations
+    first, then operation-embedded sites. The first pointer where a
+    given schema is encountered is the one reported in findings, so
+    schemas defined in ``components.*`` get the canonical pointer even
+    when they are reached transitively via a ``$ref``.
+
+    Recursion covers all composition keywords: ``properties``, ``items``,
+    ``prefixItems``, ``allOf``, ``oneOf``, ``anyOf``, ``not``, ``if``,
+    ``then``, ``else``, ``additionalProperties``, ``unevaluatedProperties``,
+    ``unevaluatedItems``, ``patternProperties``, ``dependentSchemas``,
+    ``propertyNames``, ``contains``.
     """
     seen: set[int] = set()
 
     for _, schema, pointer in iter_schemas(spec):
         yield from _walk_schema(schema, pointer, seen)
 
+    for schema, pointer in _iter_reusable_component_schemas(spec):
+        yield from _walk_schema(schema, pointer, seen)
+
     for _, _, op, op_pointer in iter_operations(spec):
         yield from _operation_schemas(op, op_pointer, spec, seen)
+
+
+def _iter_reusable_component_schemas(spec: Spec) -> Iterator[tuple[dict[str, Any], str]]:
+    """Yield schemas reachable from reusable parameter / response / etc. definitions.
+
+    For Swagger 2.0 these are top-level ``parameters`` and ``responses``
+    objects. For 3.x they are ``components.parameters``,
+    ``components.headers``, ``components.requestBodies``, and
+    ``components.responses``.
+    """
+    if spec.version == "2.0":
+        for name, param in _as_dict(spec.data.get("parameters")).items():
+            if not isinstance(param, dict):
+                continue
+            base = f"#/parameters/{encode_pointer_segment(name)}"
+            if param.get("in") == "body":
+                schema = param.get("schema")
+                if isinstance(schema, dict):
+                    yield schema, f"{base}/schema"
+            else:
+                yield param, base
+        for name, resp in _as_dict(spec.data.get("responses")).items():
+            if not isinstance(resp, dict):
+                continue
+            schema = resp.get("schema")
+            if isinstance(schema, dict):
+                yield schema, f"#/responses/{encode_pointer_segment(name)}/schema"
+        return
+
+    components = _as_dict(spec.data.get("components"))
+
+    for name, param in _as_dict(components.get("parameters")).items():
+        if not isinstance(param, dict):
+            continue
+        base = f"#/components/parameters/{encode_pointer_segment(name)}"
+        schema = param.get("schema")
+        if isinstance(schema, dict):
+            yield schema, f"{base}/schema"
+        for mime, media in _as_dict(param.get("content")).items():
+            if isinstance(media, dict) and isinstance(media.get("schema"), dict):
+                yield media["schema"], f"{base}/content/{encode_pointer_segment(mime)}/schema"
+
+    for name, header in _as_dict(components.get("headers")).items():
+        if not isinstance(header, dict):
+            continue
+        base = f"#/components/headers/{encode_pointer_segment(name)}"
+        schema = header.get("schema")
+        if isinstance(schema, dict):
+            yield schema, f"{base}/schema"
+
+    for name, rb in _as_dict(components.get("requestBodies")).items():
+        if not isinstance(rb, dict):
+            continue
+        base = f"#/components/requestBodies/{encode_pointer_segment(name)}"
+        for mime, media in _as_dict(rb.get("content")).items():
+            if isinstance(media, dict) and isinstance(media.get("schema"), dict):
+                yield media["schema"], f"{base}/content/{encode_pointer_segment(mime)}/schema"
+
+    for name, resp in _as_dict(components.get("responses")).items():
+        if not isinstance(resp, dict):
+            continue
+        base = f"#/components/responses/{encode_pointer_segment(name)}"
+        for mime, media in _as_dict(resp.get("content")).items():
+            if isinstance(media, dict) and isinstance(media.get("schema"), dict):
+                yield media["schema"], f"{base}/content/{encode_pointer_segment(mime)}/schema"
+        for hname, header in _as_dict(resp.get("headers")).items():
+            if isinstance(header, dict) and isinstance(header.get("schema"), dict):
+                yield header["schema"], (f"{base}/headers/{encode_pointer_segment(hname)}/schema")
 
 
 def _operation_schemas(
@@ -152,7 +264,7 @@ def _operation_schemas(
     spec: Spec,
     seen: set[int],
 ) -> Iterator[tuple[dict[str, Any], str]]:
-    for i, param in enumerate(op.get("parameters", [])):
+    for i, param in enumerate(_as_list(op.get("parameters"))):
         if not isinstance(param, dict):
             continue
         if spec.version == "2.0":
@@ -169,11 +281,20 @@ def _operation_schemas(
             schema = param.get("schema")
             if isinstance(schema, dict):
                 yield from _walk_schema(schema, f"{op_pointer}/parameters/{i}/schema", seen)
+            # 3.x parameters may use `content` instead of `schema`.
+            for mime, media in _as_dict(param.get("content")).items():
+                if isinstance(media, dict) and isinstance(media.get("schema"), dict):
+                    yield from _walk_schema(
+                        media["schema"],
+                        f"{op_pointer}/parameters/{i}/content/"
+                        f"{encode_pointer_segment(mime)}/schema",
+                        seen,
+                    )
 
     if spec.version != "2.0":
         request_body = op.get("requestBody")
         if isinstance(request_body, dict):
-            for mime, media in request_body.get("content", {}).items():
+            for mime, media in _as_dict(request_body.get("content")).items():
                 if isinstance(media, dict) and isinstance(media.get("schema"), dict):
                     yield from _walk_schema(
                         media["schema"],
@@ -181,7 +302,7 @@ def _operation_schemas(
                         seen,
                     )
 
-    for status, response in op.get("responses", {}).items():
+    for status, response in _as_dict(op.get("responses")).items():
         if not isinstance(response, dict):
             continue
         if spec.version == "2.0":
@@ -189,12 +310,20 @@ def _operation_schemas(
             if isinstance(schema, dict):
                 yield from _walk_schema(schema, f"{op_pointer}/responses/{status}/schema", seen)
         else:
-            for mime, media in response.get("content", {}).items():
+            for mime, media in _as_dict(response.get("content")).items():
                 if isinstance(media, dict) and isinstance(media.get("schema"), dict):
                     yield from _walk_schema(
                         media["schema"],
                         f"{op_pointer}/responses/{status}/content/"
                         f"{encode_pointer_segment(mime)}/schema",
+                        seen,
+                    )
+            for hname, header in _as_dict(response.get("headers")).items():
+                if isinstance(header, dict) and isinstance(header.get("schema"), dict):
+                    yield from _walk_schema(
+                        header["schema"],
+                        f"{op_pointer}/responses/{status}/headers/"
+                        f"{encode_pointer_segment(hname)}/schema",
                         seen,
                     )
 
@@ -223,9 +352,23 @@ def _walk_schema(
         for i, item in enumerate(items):
             yield from _walk_schema(item, f"{pointer}/items/{i}", seen)
 
+    # JSON Schema 2020-12 (OpenAPI 3.1) tuple validation.
+    prefix_items = schema.get("prefixItems")
+    if isinstance(prefix_items, list):
+        for i, item in enumerate(prefix_items):
+            yield from _walk_schema(item, f"{pointer}/prefixItems/{i}", seen)
+
     additional = schema.get("additionalProperties")
     if isinstance(additional, dict):
         yield from _walk_schema(additional, f"{pointer}/additionalProperties", seen)
+
+    unevaluated_props = schema.get("unevaluatedProperties")
+    if isinstance(unevaluated_props, dict):
+        yield from _walk_schema(unevaluated_props, f"{pointer}/unevaluatedProperties", seen)
+
+    unevaluated_items = schema.get("unevaluatedItems")
+    if isinstance(unevaluated_items, dict):
+        yield from _walk_schema(unevaluated_items, f"{pointer}/unevaluatedItems", seen)
 
     for kw in ("allOf", "oneOf", "anyOf"):
         composites = schema.get(kw)
@@ -233,9 +376,13 @@ def _walk_schema(
             for i, sub in enumerate(composites):
                 yield from _walk_schema(sub, f"{pointer}/{kw}/{i}", seen)
 
-    not_schema = schema.get("not")
-    if isinstance(not_schema, dict):
-        yield from _walk_schema(not_schema, f"{pointer}/not", seen)
+    for kw in ("not", "if", "then", "else", "propertyNames", "contains"):
+        sub = schema.get(kw)
+        if isinstance(sub, dict):
+            yield from _walk_schema(sub, f"{pointer}/{kw}", seen)
 
     for k, v in (schema.get("patternProperties") or {}).items():
         yield from _walk_schema(v, f"{pointer}/patternProperties/{encode_pointer_segment(k)}", seen)
+
+    for k, v in (schema.get("dependentSchemas") or {}).items():
+        yield from _walk_schema(v, f"{pointer}/dependentSchemas/{encode_pointer_segment(k)}", seen)

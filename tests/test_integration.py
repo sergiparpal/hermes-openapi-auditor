@@ -56,7 +56,7 @@ class TestPetstoreEndToEnd:
     def test_markdown_format(self, version: str, fixtures_dir: Path) -> None:
         result = audit_openapi_spec(
             path=str(fixtures_dir / f"petstore-{version}.yaml"),
-            format="markdown",
+            output_format="markdown",
         )
         assert "markdown" in result
         assert isinstance(result["markdown"], str)
@@ -109,6 +109,36 @@ class TestRunnerProfileOverridesFromConfig:
         rel = [f for f in result["findings"] if f["rule_id"] == "missing-descriptions"]
         assert rel, "rule should fire"
         assert all(f["severity"] == "error" for f in rel)
+
+    def test_additional_properties_3_1_carveout_survives_override(
+        self,
+        tmp_path: Path,
+        synthetic_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A 3.1 finding deliberately downgraded to info MUST survive a
+        profile override that would otherwise escalate the rule.
+
+        Without the rule emitting at a non-default severity (info vs the
+        default warning), the runner cannot distinguish 'rule chose this'
+        from 'rule fired at default'.
+        """
+        config = tmp_path / "openapi-auditor.yaml"
+        config.write_text(
+            "profiles:\n  agent-consumed:\n    additional-properties: error\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("HERMES_OPENAPI_AUDITOR_CONFIG", str(config))
+        result = audit_openapi_spec(
+            path=str(synthetic_dir / "additional-properties-3.1.yaml"),
+            severity_threshold="info",
+        )
+        rel = [f for f in result["findings"] if f["rule_id"] == "additional-properties"]
+        assert rel, "rule should fire"
+        # The Pet schema also carries unevaluatedProperties; the rule
+        # downgrades severity to 'info' to signal a deliberate choice,
+        # and the runner must preserve that over the 'error' override.
+        assert all(f["severity"] == "info" for f in rel)
 
 
 class TestRunnerCleanSpec:

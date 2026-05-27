@@ -27,9 +27,9 @@ class TestAdditionalProperties:
         assert f.rule_id == "additional-properties"
         assert "Pet" in f.path
 
-    def test_default_severity_is_info(self, synthetic_dir: Path) -> None:
+    def test_default_severity_is_warning(self, synthetic_dir: Path) -> None:
         findings = _run(synthetic_dir / "additional-properties-3.0.yaml")
-        assert all(f.severity == "info" for f in findings)
+        assert all(f.severity == "warning" for f in findings)
 
     def test_ap_false_does_not_trigger(self, synthetic_dir: Path) -> None:
         findings = _run(synthetic_dir / "additional-properties-3.0.yaml")

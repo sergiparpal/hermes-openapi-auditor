@@ -24,18 +24,19 @@ def audit_openapi_spec(
     path: str,
     profile: str = "agent-consumed",
     severity_threshold: Severity = "warning",
-    format: OutputFormat = "json",
+    output_format: OutputFormat = "json",
 ) -> dict[str, Any]:
     """Run the full audit pipeline against ``path``.
 
     Args:
         path: Path to the spec file.
         profile: ``public`` | ``internal`` | ``agent-consumed``. Unknown
-            profile names degrade to "no overrides" (each rule's default
-            severity is used).
+            profile names are rejected upstream by the Hermes handler;
+            if reached directly, they degrade to "no overrides" (each
+            rule's default severity is used).
         severity_threshold: Findings below this level are filtered out.
-        format: ``json`` returns a structured list; ``markdown`` wraps a
-            rendered string in a JSON-compatible envelope.
+        output_format: ``json`` returns a structured list; ``markdown``
+            wraps a rendered string in a JSON-compatible envelope.
 
     Returns:
         A dict ready for ``json.dumps``. On success, contains
@@ -79,7 +80,7 @@ def audit_openapi_spec(
 
     findings.sort(key=lambda f: (-severity_rank(f.severity), f.rule_id, f.path))
 
-    if format == "markdown":
+    if output_format == "markdown":
         return {
             "version": spec.version,
             "source": spec.source,

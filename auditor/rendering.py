@@ -2,13 +2,14 @@
 
 The renderer is intentionally simple: a short header with the spec
 source and version, followed by a table-of-findings grouped by
-operation (or by schema for operation-less findings), sorted by
-severity desc then rule_id.
+operation (or by schema for operation-level-less findings). The
+renderer assumes ``findings`` is already sorted by the runner (severity
+desc, rule_id, path) — preserve that order within each group.
 """
 
 from __future__ import annotations
 
-from .model import Finding, Severity, Spec, severity_rank
+from .model import Finding, Severity, Spec
 
 _SEVERITY_LABEL: dict[Severity, str] = {
     "error": "ERROR",
@@ -31,13 +32,8 @@ def to_markdown(findings: list[Finding], spec: Spec) -> str:
         lines.append("_No findings — nice spec._")
         return "\n".join(lines)
 
-    sorted_findings = sorted(
-        findings,
-        key=lambda f: (-severity_rank(f.severity), f.rule_id, f.path),
-    )
-
     grouped: dict[str, list[Finding]] = {}
-    for f in sorted_findings:
+    for f in findings:
         key = f.operation if f.operation else "(spec-level)"
         grouped.setdefault(key, []).append(f)
 

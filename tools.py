@@ -70,7 +70,7 @@ def audit_openapi_spec(args: dict[str, Any], **kwargs: Any) -> str:
             path=path,
             profile=profile,
             severity_threshold=threshold,
-            format=output_format,
+            output_format=output_format,
         )
         return json.dumps(result)
 

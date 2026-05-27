@@ -107,11 +107,33 @@ def load_user_overrides() -> dict[ProfileName, dict[str, Severity]]:
     out: dict[ProfileName, dict[str, Severity]] = {}
     for prof, rules in profiles_section.items():
         if not isinstance(rules, dict):
+            logger.warning(
+                "auditor config at %s: profile %r entry must be a mapping; ignoring",
+                path,
+                prof,
+            )
             continue
         clean: dict[str, Severity] = {}
         for rule_id, sev in rules.items():
-            if isinstance(rule_id, str) and sev in {"info", "warning", "error"}:
-                clean[rule_id] = sev
+            if not isinstance(rule_id, str):
+                logger.warning(
+                    "auditor config at %s: non-string rule id %r under profile %r; ignoring",
+                    path,
+                    rule_id,
+                    prof,
+                )
+                continue
+            if sev not in {"info", "warning", "error"}:
+                logger.warning(
+                    "auditor config at %s: invalid severity %r for %s under profile %r "
+                    "(expected one of 'info', 'warning', 'error'); ignoring",
+                    path,
+                    sev,
+                    rule_id,
+                    prof,
+                )
+                continue
+            clean[rule_id] = sev
         if clean:
             out[prof] = clean
     return out

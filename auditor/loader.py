@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -62,13 +61,13 @@ def load_spec(
             before any rule could run).
 
     Returns:
-        A :class:`Spec` with ``data`` ref-resolved and ``raw`` holding
-        the pre-resolution dict.
+        A :class:`Spec` with ``data`` ref-resolved.
 
     Raises:
         FileNotFoundError: if ``path`` does not exist.
-        InvalidSpecError: if the file is unparseable, mixes versions, or
-            (when ``validate_schema=True``) fails meta-schema validation.
+        InvalidSpecError: if the file is unparseable, mixes versions,
+            (when ``validate_schema=True``) fails meta-schema validation,
+            or ``$ref`` resolution fails (e.g. unreachable external ref).
     """
     p = Path(path)
     if not p.exists():
@@ -108,23 +107,17 @@ def load_spec(
                 f"spec at {p} failed {version} meta-schema validation: {e}"
             ) from e
 
-    raw_snapshot = copy.deepcopy(data)
     if resolve_refs:
         try:
             base_uri = p.absolute().as_uri()
             data = jsonref.replace_refs(data, base_uri=base_uri, lazy_load=False, proxies=False)
         except Exception as e:
-            # External refs may be unreachable in offline environments.
-            # Leave the spec unresolved rather than failing the whole
-            # audit — rules that need resolution will see the raw $ref
-            # nodes and can decide for themselves.
             raise InvalidSpecError(f"$ref resolution failed for {p}: {e}") from e
 
     if not isinstance(data, dict):
-        # jsonref can return a proxy that behaves like a dict; coerce.
         data = dict(data)
 
-    return Spec(version=version, data=data, source=str(p), raw=raw_snapshot)
+    return Spec(version=version, data=data, source=str(p))
 
 
 def _reject_frankenstein(data: dict[str, Any], path: Path) -> None:

@@ -35,10 +35,11 @@ def check(spec: Spec, walker: ModuleType) -> list[Finding]:
 
 def _is_documented_response(status: str) -> bool:
     """Only count 2xx/4xx/5xx and 'default' responses; ignore informational/redirect."""
-    s = str(status).upper()
-    if s == "DEFAULT":
+    s = str(status)
+    if s == "default":
         return True
-    if s in {"2XX", "4XX", "5XX"}:
+    up = s.upper()
+    if up in {"2XX", "4XX", "5XX"}:
         return True
     return bool(s) and s[0] in {"2", "4", "5"}
 
@@ -46,8 +47,9 @@ def _is_documented_response(status: str) -> bool:
 def _check_v2(spec: Spec, walker: ModuleType) -> list[Finding]:
     findings: list[Finding] = []
     for path, verb, op, pointer in walker.iter_operations(spec):
+        parameters = op.get("parameters") or []
         body_param = next(
-            (p for p in op.get("parameters", []) if isinstance(p, dict) and p.get("in") == "body"),
+            (p for p in parameters if isinstance(p, dict) and p.get("in") == "body"),
             None,
         )
         if body_param is not None:
@@ -66,8 +68,10 @@ def _check_v2(spec: Spec, walker: ModuleType) -> list[Finding]:
                     )
                 )
 
-        for status, response in op.get("responses", {}).items():
+        for status, response in (op.get("responses") or {}).items():
             if not _is_documented_response(status):
+                continue
+            if not isinstance(response, dict):
                 continue
             schema = response.get("schema")
             if not schema:
@@ -94,7 +98,7 @@ def _check_v3_0(spec: Spec, walker: ModuleType) -> list[Finding]:
     for path, verb, op, pointer in walker.iter_operations(spec):
         request_body = op.get("requestBody")
         if isinstance(request_body, dict):
-            for mime, media in request_body.get("content", {}).items():
+            for mime, media in (request_body.get("content") or {}).items():
                 if not _media_or_schema_has_example_v3_0(media):
                     findings.append(
                         Finding(
@@ -115,10 +119,12 @@ def _check_v3_0(spec: Spec, walker: ModuleType) -> list[Finding]:
                         )
                     )
 
-        for status, response in op.get("responses", {}).items():
+        for status, response in (op.get("responses") or {}).items():
             if not _is_documented_response(status):
                 continue
-            for mime, media in response.get("content", {}).items():
+            if not isinstance(response, dict):
+                continue
+            for mime, media in (response.get("content") or {}).items():
                 if not _media_or_schema_has_example_v3_0(media):
                     findings.append(
                         Finding(
@@ -148,7 +154,7 @@ def _check_v3_1(spec: Spec, walker: ModuleType) -> list[Finding]:
     for path, verb, op, pointer in walker.iter_operations(spec):
         request_body = op.get("requestBody")
         if isinstance(request_body, dict):
-            for mime, media in request_body.get("content", {}).items():
+            for mime, media in (request_body.get("content") or {}).items():
                 if not _media_or_schema_has_example_v3_1(media):
                     findings.append(
                         Finding(
@@ -169,10 +175,12 @@ def _check_v3_1(spec: Spec, walker: ModuleType) -> list[Finding]:
                         )
                     )
 
-        for status, response in op.get("responses", {}).items():
+        for status, response in (op.get("responses") or {}).items():
             if not _is_documented_response(status):
                 continue
-            for mime, media in response.get("content", {}).items():
+            if not isinstance(response, dict):
+                continue
+            for mime, media in (response.get("content") or {}).items():
                 if not _media_or_schema_has_example_v3_1(media):
                     findings.append(
                         Finding(

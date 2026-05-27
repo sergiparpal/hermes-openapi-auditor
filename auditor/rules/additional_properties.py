@@ -12,7 +12,8 @@ or merely illustrative. The fix is usually to either:
 
 3.1 nuance: if the schema also carries ``unevaluatedProperties`` (an
 OpenAPI 3.1 / JSON Schema 2020-12 keyword), the author has explicitly
-considered open-ended composition. We downgrade severity to ``info``.
+considered open-ended composition. We downgrade severity to ``info``
+and the runner preserves that choice across profile overrides.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from typing import Any
 from ..model import Finding, Severity, Spec
 
 RULE_ID = "additional-properties"
-DEFAULT_SEVERITY: Severity = "info"
+DEFAULT_SEVERITY: Severity = "warning"
 
 
 def _has_named_properties(schema: dict[str, Any]) -> bool:

@@ -89,16 +89,20 @@ response**. Without error-shape information the agent can't tell a
 recoverable input error from an unrecoverable server failure. The `4XX` /
 `5XX` wildcards (3.x) and `default` both count as documented.
 
-### `additional-properties` (default: info)
+### `additional-properties` (default: warning)
 
 Flags schemas with `additionalProperties: true` **and** at least one named
 property. A schema that lists fields *and* accepts arbitrary extras is
 ambiguous: the LLM can't tell whether the named set is exhaustive. The
-default severity is `info` because some endpoints legitimately accept
-extensions; promote it in the profile if you care.
+default severity is `warning`; the `internal` profile pre-downgrades it
+to `info` for endpoints that legitimately accept extensions, and the
+`public` profile can be escalated further via `~/.hermes/openapi-auditor.yaml`.
 
 3.1 nuance: when `unevaluatedProperties` is also present the author has
-explicitly addressed open-ended composition, so the rule stays at `info`.
+explicitly addressed open-ended composition, so the rule emits at `info`.
+The runner preserves that deliberate choice across any profile override —
+escalating `additional-properties` to `error` will NOT touch findings the
+rule downgraded.
 
 ### `missing-examples` (default: warning)
 
@@ -114,6 +118,9 @@ checks (per version):
 - **3.1:** same as 3.0 plus a non-empty schema-level `examples: [...]`
   array (JSON Schema 2020-12).
 
+`default` (lowercase per spec) and the wildcards `2XX`/`4XX`/`5XX` are
+treated as documented responses for example-coverage purposes.
+
 ### `ambiguous-types` (default: warning)
 
 Flags type declarations that are ambiguous or version-incorrect:
@@ -126,6 +133,18 @@ Flags type declarations that are ambiguous or version-incorrect:
 - **3.1:** any use of `nullable` (it was removed in 3.1 — use
   `type: [..., "null"]`); `exclusiveMinimum` / `exclusiveMaximum` declared
   as booleans (3.1 / JSON Schema 2020-12 expects numbers).
+
+The walker reaches every schema-shaped sub-object: reusable
+`components.schemas` and `definitions` first (so findings report canonical
+pointers), then `components.parameters` / `headers` / `requestBodies` /
+`responses` (3.x), then per-operation parameter schemas, request bodies,
+response bodies, and response headers. It recurses through `properties`,
+`items`, `prefixItems`, composition (`allOf` / `oneOf` / `anyOf` / `not`),
+3.1 conditional sub-schemas (`if` / `then` / `else`), property maps
+(`additionalProperties`, `unevaluatedProperties`, `patternProperties`,
+`dependentSchemas`, `propertyNames`), `contains`, and `unevaluatedItems`.
+OpenAPI 3.1 top-level `webhooks` are iterated alongside `paths` with
+pointer prefix `#/webhooks/`. (Callbacks are not currently traversed.)
 
 ## Profiles
 

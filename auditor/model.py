@@ -7,7 +7,7 @@ isolation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 Version = Literal["2.0", "3.0", "3.1"]
@@ -70,8 +70,3 @@ class Spec:
     version: Version
     data: dict[str, Any]
     source: str
-    raw: dict[str, Any] = field(default_factory=dict)
-    """Original spec dict *before* ``$ref`` resolution. Useful when a rule
-    needs to inspect the actual reference rather than its resolved target
-    (e.g. to report the pointer the user wrote). Defaults to an empty
-    dict when ``resolve_refs=False`` (raw and data are identical)."""
