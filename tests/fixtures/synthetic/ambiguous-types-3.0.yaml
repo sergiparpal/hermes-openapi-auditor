@@ -1,0 +1,52 @@
+openapi: 3.0.3
+info:
+  title: Ambiguous Types 3.0
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      summary: List pets
+      description: Returns the registered pets.
+      responses:
+        "200":
+          description: ok.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+              example: { id: 1 }
+        "500":
+          description: Server error.
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        id: { type: integer }
+        # `nullable: true` without `type` -- triggers the rule.
+        nickname:
+          nullable: true
+        # oneOf with 2 variants and no discriminator -- triggers the rule.
+        identifier:
+          oneOf:
+            - { type: integer }
+            - { type: string }
+      additionalProperties: false
+      example: { id: 1 }
+    # nullable: true WITH a type is OK -- should NOT trigger.
+    Owner:
+      type: object
+      properties:
+        deactivated_at:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+      example: { deactivated_at: null }
+    # oneOf with discriminator present -- should NOT trigger.
+    Animal:
+      oneOf:
+        - $ref: "#/components/schemas/Pet"
+        - $ref: "#/components/schemas/Owner"
+      discriminator:
+        propertyName: kind

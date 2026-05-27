@@ -15,6 +15,8 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+.mypy_cache/
+.ruff_cache/
 
 # Windows/WSL "mark of the web" metadata
 *:Zone.Identifier

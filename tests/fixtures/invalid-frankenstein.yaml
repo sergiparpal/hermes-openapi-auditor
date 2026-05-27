@@ -1,0 +1,9 @@
+# Frankenstein spec: declares both Swagger 2.0 and OpenAPI 3.x markers.
+swagger: "2.0"
+openapi: "3.0.3"
+info:
+  title: Frankenstein
+  version: "1.0.0"
+paths: {}
+components:
+  schemas: {}

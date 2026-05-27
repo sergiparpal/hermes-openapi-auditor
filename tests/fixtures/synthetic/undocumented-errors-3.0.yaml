@@ -1,0 +1,42 @@
+openapi: 3.0.3
+info:
+  title: Undocumented Errors
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      summary: List pets
+      description: Returns the registered pets.
+      responses:
+        # Only 2xx documented -- triggers the rule.
+        "200":
+          description: ok.
+          content:
+            application/json:
+              schema: { type: object, example: {} }
+  /tags:
+    get:
+      summary: List tags
+      description: Returns the registered tags.
+      responses:
+        "200":
+          description: ok.
+          content:
+            application/json:
+              schema: { type: object, example: {} }
+        # Wildcard 4XX counts -- should NOT trigger.
+        "4XX":
+          description: Client error.
+  /owners:
+    get:
+      summary: List owners
+      description: Returns the registered owners.
+      responses:
+        "200":
+          description: ok.
+          content:
+            application/json:
+              schema: { type: object, example: {} }
+        # `default` counts -- should NOT trigger.
+        default:
+          description: Any other status.

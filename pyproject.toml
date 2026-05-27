@@ -1,0 +1,102 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-openapi-auditor"
+version = "0.1.0"
+description = "Hermes Agent plugin that audits OpenAPI/Swagger specs (2.0, 3.0, 3.1) for quality issues that hurt human readers and LLMs consuming the spec via function calling."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "sergiparpal" }]
+keywords = ["hermes-agent", "openapi", "swagger", "linter", "plugin"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "PyYAML>=6.0",
+    "jsonschema>=4.18",
+    "openapi-spec-validator>=0.7",
+    "jsonref>=1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "pytest-cov>=4",
+    "ruff>=0.4",
+    "mypy>=1.8",
+    "types-PyYAML",
+]
+
+[project.entry-points."hermes_agent.plugins"]
+hermes-openapi-auditor = "hermes_openapi_auditor"
+
+[tool.setuptools]
+# Map the importable Python package name (underscores) onto the repo root
+# (hyphens). Hermes discovers the plugin from the directory layout; pip
+# discovers it from the package name. Both must coexist.
+package-dir = { "hermes_openapi_auditor" = "." }
+packages = [
+    "hermes_openapi_auditor",
+    "hermes_openapi_auditor.auditor",
+    "hermes_openapi_auditor.auditor.rules",
+]
+include-package-data = true
+
+[tool.setuptools.package-data]
+hermes_openapi_auditor = ["plugin.yaml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]  # line length is handled by formatter
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+# The repo root has __init__.py with a hyphenated directory name, which
+# isn't a valid Python identifier. These flags let mypy descend into
+# auditor/ without choking on the parent directory's name.
+explicit_package_bases = true
+namespace_packages = true
+# The Hermes PluginContext type is not publicly exported; tolerate Any at the boundary.
+[[tool.mypy.overrides]]
+module = "hermes_openapi_auditor"
+disallow_any_explicit = false
+[[tool.mypy.overrides]]
+module = "hermes_openapi_auditor.tools"
+disallow_any_explicit = false
+# Third-party libraries without type stubs we depend on.
+[[tool.mypy.overrides]]
+module = ["jsonref", "openapi_spec_validator", "openapi_spec_validator.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# importlib mode is required because the repo root has __init__.py with a
+# hyphen in the directory name; the default "prepend" mode would try to
+# import "hermes-openapi-auditor.tests.test_x" and fail.
+addopts = "-ra --import-mode=importlib"
+
+[tool.coverage.run]
+branch = true
+source = ["auditor"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

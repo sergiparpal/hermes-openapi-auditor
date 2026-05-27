@@ -1,0 +1,39 @@
+openapi: 3.0.3
+info:
+  title: Missing Descriptions
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      # No summary, no description -- triggers the rule.
+      responses:
+        "200":
+          description: ok.
+          content:
+            application/json:
+              schema: { type: array, items: { type: object }, example: [] }
+        "500":
+          description: Server error.
+    post:
+      summary: Add a pet
+      # summary present, no description -- should NOT trigger.
+      responses:
+        "201":
+          description: created.
+          content:
+            application/json:
+              schema: { type: object, example: {} }
+        "400":
+          description: Bad request.
+  /tags:
+    put:
+      description: Replace the tag list.
+      # description present, no summary -- should NOT trigger.
+      responses:
+        "200":
+          description: ok.
+          content:
+            application/json:
+              schema: { type: object, example: {} }
+        "500":
+          description: Server error.

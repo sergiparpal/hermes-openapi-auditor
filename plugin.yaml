@@ -1,0 +1,14 @@
+name: hermes-openapi-auditor
+version: 0.1.0
+description: >
+  Audits OpenAPI/Swagger specs (2.0, 3.0, 3.1) for quality issues that hurt
+  both human readers and LLMs consuming the spec via function calling.
+  Checks for missing descriptions, ambiguous types, missing examples,
+  permissive additionalProperties, and undocumented error codes.
+author: sergiparpal
+
+# What this plugin registers. These lists are how Hermes describes the plugin
+# in `/plugins` output and the loading banner.
+provides_tools:
+  - audit_openapi_spec
+provides_hooks: []

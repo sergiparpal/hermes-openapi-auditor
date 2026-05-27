@@ -1,0 +1,40 @@
+openapi: 3.0.3
+info:
+  title: Additional Properties
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      summary: List pets
+      description: Returns the registered pets.
+      responses:
+        "200":
+          description: ok.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pet" }
+              example: { id: 1, name: Rex }
+        "500":
+          description: Server error.
+components:
+  schemas:
+    # Named properties + additionalProperties: true -- triggers the rule.
+    Pet:
+      type: object
+      additionalProperties: true
+      properties:
+        id: { type: integer }
+        name: { type: string }
+      example: { id: 1, name: Rex }
+    # additionalProperties: false on a property-bearing schema -- should NOT trigger.
+    Owner:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: integer }
+      example: { id: 1 }
+    # additionalProperties: true on a schema with NO named properties -- should NOT trigger.
+    Tag:
+      type: object
+      additionalProperties: true
+      example: { color: red }

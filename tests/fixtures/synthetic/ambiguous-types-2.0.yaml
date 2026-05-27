@@ -1,0 +1,55 @@
+swagger: "2.0"
+info:
+  title: Ambiguous Types 2.0
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      summary: List pets
+      description: Returns the registered pets.
+      parameters:
+        # Bare `type: string`, no format/enum/pattern -- triggers the rule.
+        - name: filter
+          in: query
+          type: string
+        # `enum` constraint -- should NOT trigger.
+        - name: status
+          in: query
+          type: string
+          enum: [available, pending, sold]
+        # `format` constraint -- should NOT trigger.
+        - name: since
+          in: query
+          type: string
+          format: date-time
+        # `pattern` constraint -- should NOT trigger.
+        - name: code
+          in: query
+          type: string
+          pattern: "^[A-Z]{3}$"
+      responses:
+        "200":
+          description: ok.
+          schema:
+            type: object
+            example: {}
+        "500":
+          description: Server error.
+  /upload:
+    post:
+      summary: Upload a pet photo
+      description: Multipart upload.
+      consumes: [multipart/form-data]
+      parameters:
+        # `type: file` -- legitimate 2.0 idiom, should NOT trigger.
+        - name: photo
+          in: formData
+          type: file
+      responses:
+        "200":
+          description: ok.
+          schema:
+            type: object
+            example: {}
+        "400":
+          description: Bad request.

@@ -1,0 +1,41 @@
+swagger: "2.0"
+info:
+  title: Missing Examples 2.0
+  version: "1.0.0"
+paths:
+  /pets:
+    post:
+      summary: Add a pet
+      description: Add a new pet to the store.
+      parameters:
+        - name: pet
+          in: body
+          required: true
+          # body parameter schema has NO `example` -- triggers the rule.
+          schema:
+            type: object
+            properties:
+              name: { type: string }
+      responses:
+        # Response schema present, no `example` and no `examples` -- triggers.
+        "200":
+          description: ok.
+          schema:
+            type: object
+            properties:
+              id: { type: integer }
+        "400":
+          description: Bad request.
+  /tags:
+    get:
+      summary: List tags
+      description: Returns the registered tags.
+      responses:
+        # Schema with inline `example` -- should NOT trigger.
+        "200":
+          description: ok.
+          schema:
+            type: object
+            example: { tag: red }
+        "500":
+          description: Server error.

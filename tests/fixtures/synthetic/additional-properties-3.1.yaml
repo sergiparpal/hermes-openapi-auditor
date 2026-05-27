@@ -1,0 +1,30 @@
+openapi: 3.1.0
+info:
+  title: Additional Properties 3.1
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      summary: List pets
+      description: Returns the registered pets.
+      responses:
+        "200":
+          description: ok.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pet" }
+              example: { id: 1, name: Rex }
+        "500":
+          description: Server error.
+components:
+  schemas:
+    # additionalProperties: true + unevaluatedProperties present
+    # -> rule still fires but at info severity (downgraded).
+    Pet:
+      type: object
+      additionalProperties: true
+      unevaluatedProperties: false
+      properties:
+        id: { type: integer }
+        name: { type: string }
+      example: { id: 1, name: Rex }

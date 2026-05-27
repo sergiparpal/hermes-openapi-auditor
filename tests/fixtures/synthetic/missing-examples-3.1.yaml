@@ -1,0 +1,45 @@
+openapi: 3.1.0
+info:
+  title: Missing Examples 3.1
+  version: "1.0.0"
+paths:
+  /pets:
+    post:
+      summary: Add a pet
+      description: Add a new pet to the store.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            # No `example` or `examples` -- triggers the rule.
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+      responses:
+        "200":
+          description: ok.
+          content:
+            application/json:
+              # Schema-level `examples: [...]` ARRAY is valid in 3.1 -- should NOT trigger.
+              schema:
+                type: object
+                examples:
+                  - { id: 1 }
+        "400":
+          description: Bad request.
+  /tags:
+    get:
+      summary: List tags
+      description: Returns the registered tags.
+      responses:
+        "200":
+          description: ok.
+          content:
+            application/json:
+              # Empty examples array -- DOES trigger (no useful example present).
+              schema:
+                type: object
+                examples: []
+        "500":
+          description: Server error.
