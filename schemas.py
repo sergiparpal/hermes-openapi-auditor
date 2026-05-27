@@ -1,11 +1,24 @@
 """Tool schemas — the OpenAI function-calling shapes the LLM reads.
 
 Schemas live in their own module per the official Hermes plugin convention.
+
+Enumerated values and defaults are derived from
+:mod:`hermes_openapi_auditor.auditor.model` so the LLM-facing schema and
+the runtime validator in :mod:`hermes_openapi_auditor.tools` cannot drift.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+from .auditor.model import (
+    DEFAULT_FORMAT,
+    DEFAULT_PROFILE,
+    DEFAULT_THRESHOLD,
+    OUTPUT_FORMATS,
+    PROFILE_NAMES,
+    SEVERITY_LEVELS,
+)
 
 AUDIT_OPENAPI_SPEC: dict[str, Any] = {
     "name": "audit_openapi_spec",
@@ -27,8 +40,8 @@ AUDIT_OPENAPI_SPEC: dict[str, Any] = {
             },
             "profile": {
                 "type": "string",
-                "enum": ["public", "internal", "agent-consumed"],
-                "default": "agent-consumed",
+                "enum": list(PROFILE_NAMES),
+                "default": DEFAULT_PROFILE,
                 "description": (
                     "Audit profile. 'public' is strictest; 'internal' relaxes "
                     "cosmetic issues; 'agent-consumed' prioritizes signals that "
@@ -37,14 +50,14 @@ AUDIT_OPENAPI_SPEC: dict[str, Any] = {
             },
             "severity_threshold": {
                 "type": "string",
-                "enum": ["info", "warning", "error"],
-                "default": "warning",
+                "enum": list(SEVERITY_LEVELS),
+                "default": DEFAULT_THRESHOLD,
                 "description": "Minimum severity to include in the output.",
             },
             "format": {
                 "type": "string",
-                "enum": ["json", "markdown"],
-                "default": "json",
+                "enum": list(OUTPUT_FORMATS),
+                "default": DEFAULT_FORMAT,
                 "description": (
                     "Output format. 'json' returns a structured findings list "
                     "(best for agent iteration); 'markdown' returns a human-"

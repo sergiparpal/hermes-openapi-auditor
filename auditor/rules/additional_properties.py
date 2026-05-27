@@ -18,10 +18,10 @@ and the runner preserves that choice across profile overrides.
 
 from __future__ import annotations
 
-from types import ModuleType
 from typing import Any
 
 from ..model import Finding, Severity, Spec
+from ..walker import WalkerLike
 
 RULE_ID = "additional-properties"
 DEFAULT_SEVERITY: Severity = "warning"
@@ -32,7 +32,7 @@ def _has_named_properties(schema: dict[str, Any]) -> bool:
     return isinstance(props, dict) and len(props) > 0
 
 
-def check(spec: Spec, walker: ModuleType) -> list[Finding]:
+def check(spec: Spec, walker: WalkerLike) -> list[Finding]:
     findings: list[Finding] = []
     for schema, pointer in walker.iter_all_schemas(spec):
         if schema.get("additionalProperties") is not True:

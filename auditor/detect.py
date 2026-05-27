@@ -28,28 +28,29 @@ def detect_version(spec: dict[str, Any]) -> Version:
     swagger = spec.get("swagger")
     openapi = spec.get("openapi")
 
+    # NOTE: ``loader._reject_frankenstein`` also flags this case, with a
+    # path-rich error before this function is reached. The duplicated
+    # check here keeps ``detect_version`` usable in isolation.
     if swagger is not None and openapi is not None:
         raise InvalidSpecError("spec declares both 'swagger' and 'openapi' fields; pick one")
 
     if swagger is not None:
-        s = str(swagger)
-        if s == "2.0":
+        swagger_str = str(swagger)
+        if swagger_str == "2.0":
             return "2.0"
-        raise InvalidSpecError(f"unsupported swagger version: {s!r} (only '2.0' is recognized)")
+        raise InvalidSpecError(
+            f"unsupported swagger version: {swagger_str!r} (only '2.0' is recognized)"
+        )
 
     if openapi is not None:
-        o = str(openapi)
-        if o.startswith("3.0."):
+        openapi_str = str(openapi)
+        # Accept bare major.minor (``3.0``) and patch-versioned (``3.0.3``) alike.
+        if openapi_str == "3.0" or openapi_str.startswith("3.0."):
             return "3.0"
-        if o.startswith("3.1."):
-            return "3.1"
-        # Tolerate bare major.minor like "3.0" or "3.1".
-        if o == "3.0":
-            return "3.0"
-        if o == "3.1":
+        if openapi_str == "3.1" or openapi_str.startswith("3.1."):
             return "3.1"
         raise InvalidSpecError(
-            f"unsupported openapi version: {o!r} (only 3.0.x and 3.1.x are recognized)"
+            f"unsupported openapi version: {openapi_str!r} (only 3.0.x and 3.1.x are recognized)"
         )
 
     raise InvalidSpecError("spec has neither 'swagger' nor 'openapi' field")

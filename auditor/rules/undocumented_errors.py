@@ -13,41 +13,39 @@ We accept three signals as "errors documented":
 
 from __future__ import annotations
 
-from types import ModuleType
-
 from ..model import Finding, Severity, Spec
+from ..walker import WalkerLike
 
 RULE_ID = "undocumented-errors"
 DEFAULT_SEVERITY: Severity = "warning"
 
 
 def _is_error_response(status: str) -> bool:
-    s = str(status).strip()
-    if not s:
+    status_str = str(status).strip()
+    if not status_str:
         return False
-    if s == "default":
+    if status_str == "default":
         return True
-    up = s.upper()
-    if up in {"4XX", "5XX"}:
+    if status_str.upper() in {"4XX", "5XX"}:
         return True
-    return s[0] in {"4", "5"}
+    return status_str[0] in {"4", "5"}
 
 
-def check(spec: Spec, walker: ModuleType) -> list[Finding]:
+def check(spec: Spec, walker: WalkerLike) -> list[Finding]:
     findings: list[Finding] = []
-    for path, verb, op, pointer in walker.iter_operations(spec):
-        responses = op.get("responses") or {}
+    for ctx in walker.iter_operations(spec):
+        responses = walker.as_dict(ctx.op.get("responses"))
         if not any(_is_error_response(s) for s in responses):
             findings.append(
                 Finding(
                     rule_id=RULE_ID,
                     severity=DEFAULT_SEVERITY,
                     message=(
-                        f"Operation {verb.upper()} {path} declares no 4xx/5xx "
+                        f"Operation {ctx.label} declares no 4xx/5xx "
                         "error responses (and no 'default' fallback)."
                     ),
-                    path=f"{pointer}/responses",
-                    operation=f"{verb.upper()} {path}",
+                    path=f"{ctx.pointer}/responses",
+                    operation=ctx.label,
                     suggestion=(
                         "Document at least one error response (e.g. 400, 404, "
                         "500) or add a 'default' catch-all."

@@ -1,12 +1,20 @@
-"""Domain model: ``Finding``, ``Spec``, and the ``Severity``/``Version`` literals.
+"""Domain model: ``Finding``, ``Spec``, and the enumerated public values.
 
 The model layer is independent of Hermes. Every type defined here uses
 ordinary Python data structures so the engine can be unit-tested in
 isolation.
+
+This module is the single source of truth for the enumerated values of
+the public types — ``Severity``, ``Version``, ``ProfileName``,
+``OutputFormat`` — and for the documented defaults. The Hermes-facing
+schema (:mod:`hermes_openapi_auditor.schemas`) and runtime validator
+(:mod:`hermes_openapi_auditor.tools`) both derive from these constants
+so the two cannot drift apart.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -16,7 +24,29 @@ Version = Literal["2.0", "3.0", "3.1"]
 Severity = Literal["info", "warning", "error"]
 """Finding severity levels, ordered low to high."""
 
-_SEVERITY_ORDER: dict[Severity, int] = {"info": 0, "warning": 1, "error": 2}
+OutputFormat = Literal["json", "markdown"]
+"""Supported output formats."""
+
+# Profile names are open-ended: the user config (~/.hermes/openapi-auditor.yaml)
+# can introduce additional profile names beyond the built-ins. The alias is
+# kept so call sites read more intent-fully than a bare ``str``.
+ProfileName = str
+
+SEVERITY_LEVELS: tuple[Severity, ...] = ("info", "warning", "error")
+"""All severity levels in ascending order."""
+
+PROFILE_NAMES: tuple[str, ...] = ("public", "internal", "agent-consumed")
+"""The built-in profile names. Used by the LLM-facing schema and the
+runtime validator; user config may register additional names at runtime."""
+
+OUTPUT_FORMATS: tuple[OutputFormat, ...] = ("json", "markdown")
+"""All supported output formats."""
+
+DEFAULT_PROFILE: str = "agent-consumed"
+DEFAULT_THRESHOLD: Severity = "warning"
+DEFAULT_FORMAT: OutputFormat = "json"
+
+_SEVERITY_ORDER: dict[Severity, int] = {level: i for i, level in enumerate(SEVERITY_LEVELS)}
 
 
 def severity_rank(level: Severity) -> int:
@@ -41,18 +71,13 @@ class Finding:
     suggestion: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Serializable representation used in the JSON output payload."""
-        out: dict[str, Any] = {
-            "rule_id": self.rule_id,
-            "severity": self.severity,
-            "message": self.message,
-            "path": self.path,
-        }
-        if self.operation is not None:
-            out["operation"] = self.operation
-        if self.suggestion is not None:
-            out["suggestion"] = self.suggestion
-        return out
+        """Serializable representation used in the JSON output payload.
+
+        Optional fields (``operation``, ``suggestion``) are omitted when
+        ``None`` to keep the payload tight. Field order matches the
+        dataclass declaration order.
+        """
+        return {k: v for k, v in dataclasses.asdict(self).items() if v is not None}
 
 
 @dataclass(slots=True)

@@ -16,11 +16,20 @@ import json
 from typing import Any
 
 from .auditor.detect import InvalidSpecError
+from .auditor.model import (
+    DEFAULT_FORMAT,
+    DEFAULT_PROFILE,
+    DEFAULT_THRESHOLD,
+    OUTPUT_FORMATS,
+    PROFILE_NAMES,
+    SEVERITY_LEVELS,
+)
 from .auditor.runner import audit_openapi_spec as _run_audit
 
-_ALLOWED_PROFILES = {"public", "internal", "agent-consumed"}
-_ALLOWED_THRESHOLDS = {"info", "warning", "error"}
-_ALLOWED_FORMATS = {"json", "markdown"}
+
+def _enum_error(name: str, value: Any, allowed: tuple[str, ...]) -> str:
+    """Build the JSON error payload for an out-of-range enum argument."""
+    return json.dumps({"error": f"invalid {name} {value!r}; expected one of {list(allowed)}"})
 
 
 def audit_openapi_spec(args: dict[str, Any], **kwargs: Any) -> str:
@@ -34,37 +43,17 @@ def audit_openapi_spec(args: dict[str, Any], **kwargs: Any) -> str:
         if not path:
             return json.dumps({"error": "'path' argument is required"})
 
-        profile = args.get("profile", "agent-consumed")
-        if profile not in _ALLOWED_PROFILES:
-            return json.dumps(
-                {
-                    "error": (
-                        f"invalid profile {profile!r}; expected one of {sorted(_ALLOWED_PROFILES)}"
-                    )
-                }
-            )
+        profile = args.get("profile", DEFAULT_PROFILE)
+        if profile not in PROFILE_NAMES:
+            return _enum_error("profile", profile, PROFILE_NAMES)
 
-        threshold = args.get("severity_threshold", "warning")
-        if threshold not in _ALLOWED_THRESHOLDS:
-            return json.dumps(
-                {
-                    "error": (
-                        f"invalid severity_threshold {threshold!r}; expected "
-                        f"one of {sorted(_ALLOWED_THRESHOLDS)}"
-                    )
-                }
-            )
+        threshold = args.get("severity_threshold", DEFAULT_THRESHOLD)
+        if threshold not in SEVERITY_LEVELS:
+            return _enum_error("severity_threshold", threshold, SEVERITY_LEVELS)
 
-        output_format = args.get("format", "json")
-        if output_format not in _ALLOWED_FORMATS:
-            return json.dumps(
-                {
-                    "error": (
-                        f"invalid format {output_format!r}; expected one of "
-                        f"{sorted(_ALLOWED_FORMATS)}"
-                    )
-                }
-            )
+        output_format = args.get("format", DEFAULT_FORMAT)
+        if output_format not in OUTPUT_FORMATS:
+            return _enum_error("format", output_format, OUTPUT_FORMATS)
 
         result = _run_audit(
             path=path,

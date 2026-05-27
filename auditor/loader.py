@@ -69,12 +69,12 @@ def load_spec(
             (when ``validate_schema=True``) fails meta-schema validation,
             or ``$ref`` resolution fails (e.g. unreachable external ref).
     """
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"spec file not found: {p}")
+    spec_path = Path(path)
+    if not spec_path.exists():
+        raise FileNotFoundError(f"spec file not found: {spec_path}")
 
-    raw_text = p.read_text(encoding="utf-8")
-    suffix = p.suffix.lower()
+    raw_text = spec_path.read_text(encoding="utf-8")
+    suffix = spec_path.suffix.lower()
     try:
         if suffix == ".json":
             data: Any = json.loads(raw_text)
@@ -85,14 +85,16 @@ def load_spec(
                 f"unsupported file extension {suffix!r}; expected .json, .yaml, or .yml"
             )
     except json.JSONDecodeError as e:
-        raise InvalidSpecError(f"failed to parse JSON at {p}: {e}") from e
+        raise InvalidSpecError(f"failed to parse JSON at {spec_path}: {e}") from e
     except yaml.YAMLError as e:
-        raise InvalidSpecError(f"failed to parse YAML at {p}: {e}") from e
+        raise InvalidSpecError(f"failed to parse YAML at {spec_path}: {e}") from e
 
     if not isinstance(data, dict):
-        raise InvalidSpecError(f"spec root must be a mapping, got {type(data).__name__} at {p}")
+        raise InvalidSpecError(
+            f"spec root must be a mapping, got {type(data).__name__} at {spec_path}"
+        )
 
-    _reject_frankenstein(data, p)
+    _reject_frankenstein(data, spec_path)
     version = detect_version(data)
 
     # Validate against the matching meta-schema. We pick an explicit
@@ -104,20 +106,20 @@ def load_spec(
             validate(data, cls=validator_cls)
         except Exception as e:
             raise InvalidSpecError(
-                f"spec at {p} failed {version} meta-schema validation: {e}"
+                f"spec at {spec_path} failed {version} meta-schema validation: {e}"
             ) from e
 
     if resolve_refs:
         try:
-            base_uri = p.absolute().as_uri()
+            base_uri = spec_path.absolute().as_uri()
             data = jsonref.replace_refs(data, base_uri=base_uri, lazy_load=False, proxies=False)
         except Exception as e:
-            raise InvalidSpecError(f"$ref resolution failed for {p}: {e}") from e
+            raise InvalidSpecError(f"$ref resolution failed for {spec_path}: {e}") from e
 
     if not isinstance(data, dict):
         data = dict(data)
 
-    return Spec(version=version, data=data, source=str(p))
+    return Spec(version=version, data=data, source=str(spec_path))
 
 
 def _reject_frankenstein(data: dict[str, Any], path: Path) -> None:

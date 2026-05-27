@@ -16,40 +16,40 @@ Divergences by version:
 
 from __future__ import annotations
 
-from types import ModuleType
 from typing import Any
 
 from ..model import Finding, Severity, Spec
+from ..walker import OperationCtx, WalkerLike
 
 RULE_ID = "missing-examples"
 DEFAULT_SEVERITY: Severity = "warning"
 
 
-def check(spec: Spec, walker: ModuleType) -> list[Finding]:
+def check(spec: Spec, walker: WalkerLike) -> list[Finding]:
     if spec.version == "2.0":
         return _check_v2(spec, walker)
-    if spec.version == "3.0":
-        return _check_v3_0(spec, walker)
-    return _check_v3_1(spec, walker)
+    return _check_v3(spec, walker, allow_schema_examples_array=spec.version == "3.1")
 
 
 def _is_documented_response(status: str) -> bool:
     """Only count 2xx/4xx/5xx and 'default' responses; ignore informational/redirect."""
-    s = str(status)
-    if s == "default":
+    status_str = str(status)
+    if status_str == "default":
         return True
-    up = s.upper()
-    if up in {"2XX", "4XX", "5XX"}:
+    if status_str.upper() in {"2XX", "4XX", "5XX"}:
         return True
-    return bool(s) and s[0] in {"2", "4", "5"}
+    return bool(status_str) and status_str[0] in {"2", "4", "5"}
 
 
-def _check_v2(spec: Spec, walker: ModuleType) -> list[Finding]:
+def _check_v2(spec: Spec, walker: WalkerLike) -> list[Finding]:
     findings: list[Finding] = []
-    for path, verb, op, pointer in walker.iter_operations(spec):
-        parameters = op.get("parameters") or []
+    for ctx in walker.iter_operations(spec):
         body_param = next(
-            (p for p in parameters if isinstance(p, dict) and p.get("in") == "body"),
+            (
+                p
+                for p in walker.as_list(ctx.op.get("parameters"))
+                if isinstance(p, dict) and p.get("in") == "body"
+            ),
             None,
         )
         if body_param is not None:
@@ -59,16 +59,14 @@ def _check_v2(spec: Spec, walker: ModuleType) -> list[Finding]:
                     Finding(
                         rule_id=RULE_ID,
                         severity=DEFAULT_SEVERITY,
-                        message=(
-                            f"Request body of {verb.upper()} {path} has no 'example' on its schema."
-                        ),
-                        path=f"{pointer}/parameters",
-                        operation=f"{verb.upper()} {path}",
-                        suggestion=("Add an 'example' field to the body parameter's schema."),
+                        message=f"Request body of {ctx.label} has no 'example' on its schema.",
+                        path=f"{ctx.pointer}/parameters",
+                        operation=ctx.label,
+                        suggestion="Add an 'example' field to the body parameter's schema.",
                     )
                 )
 
-        for status, response in (op.get("responses") or {}).items():
+        for status, response in walker.as_dict(ctx.op.get("responses")).items():
             if not _is_documented_response(status):
                 continue
             if not isinstance(response, dict):
@@ -81,9 +79,9 @@ def _check_v2(spec: Spec, walker: ModuleType) -> list[Finding]:
                     Finding(
                         rule_id=RULE_ID,
                         severity=DEFAULT_SEVERITY,
-                        message=(f"Response {status} of {verb.upper()} {path} has no example."),
-                        path=f"{pointer}/responses/{status}",
-                        operation=f"{verb.upper()} {path}",
+                        message=f"Response {status} of {ctx.label} has no example.",
+                        path=f"{ctx.pointer}/responses/{status}",
+                        operation=ctx.label,
                         suggestion=(
                             "Add 'examples' (keyed by mime) on the response, "
                             "or 'example' on the schema."
@@ -93,133 +91,103 @@ def _check_v2(spec: Spec, walker: ModuleType) -> list[Finding]:
     return findings
 
 
-def _check_v3_0(spec: Spec, walker: ModuleType) -> list[Finding]:
-    findings: list[Finding] = []
-    for path, verb, op, pointer in walker.iter_operations(spec):
-        request_body = op.get("requestBody")
-        if isinstance(request_body, dict):
-            for mime, media in (request_body.get("content") or {}).items():
-                if not _media_or_schema_has_example_v3_0(media):
-                    findings.append(
-                        Finding(
-                            rule_id=RULE_ID,
-                            severity=DEFAULT_SEVERITY,
-                            message=(
-                                f"Request body {mime} of {verb.upper()} {path} has no example."
-                            ),
-                            path=(
-                                f"{pointer}/requestBody/content/"
-                                f"{walker.encode_pointer_segment(mime)}"
-                            ),
-                            operation=f"{verb.upper()} {path}",
-                            suggestion=(
-                                "Add 'example'/'examples' on the mediaType or "
-                                "'example' on the schema."
-                            ),
-                        )
-                    )
+def _check_v3(
+    spec: Spec,
+    walker: WalkerLike,
+    *,
+    allow_schema_examples_array: bool,
+) -> list[Finding]:
+    """Shared body for OpenAPI 3.0 and 3.1.
 
-        for status, response in (op.get("responses") or {}).items():
-            if not _is_documented_response(status):
-                continue
-            if not isinstance(response, dict):
-                continue
-            for mime, media in (response.get("content") or {}).items():
-                if not _media_or_schema_has_example_v3_0(media):
-                    findings.append(
-                        Finding(
-                            rule_id=RULE_ID,
-                            severity=DEFAULT_SEVERITY,
-                            message=(
-                                f"Response {status} ({mime}) of {verb.upper()} "
-                                f"{path} has no example."
-                            ),
-                            path=(
-                                f"{pointer}/responses/{status}/content/"
-                                f"{walker.encode_pointer_segment(mime)}"
-                            ),
-                            operation=f"{verb.upper()} {path}",
-                            suggestion=(
-                                "Add 'example'/'examples' on the mediaType or "
-                                "'example' on the schema."
-                            ),
-                        )
-                    )
+    The only behavioral difference between the two is whether a schema-
+    level ``examples: [...]`` array (JSON Schema 2020-12, 3.1-only)
+    counts as documenting the example. Everything else — message
+    wording, paths, suggestions, response filtering — is identical.
+    """
+    suggestion = _suggestion_text(allow_schema_examples_array)
+    findings: list[Finding] = []
+    for ctx in walker.iter_operations(spec):
+        findings.extend(
+            _request_body_findings(ctx, walker, allow_schema_examples_array, suggestion)
+        )
+        findings.extend(_response_findings(ctx, walker, allow_schema_examples_array, suggestion))
     return findings
 
 
-def _check_v3_1(spec: Spec, walker: ModuleType) -> list[Finding]:
-    """Same shape as 3.0 plus schema-level ``examples: [...]`` arrays count."""
+def _request_body_findings(
+    ctx: OperationCtx,
+    walker: WalkerLike,
+    allow_schema_examples_array: bool,
+    suggestion: str,
+) -> list[Finding]:
+    request_body = ctx.op.get("requestBody")
+    if not isinstance(request_body, dict):
+        return []
     findings: list[Finding] = []
-    for path, verb, op, pointer in walker.iter_operations(spec):
-        request_body = op.get("requestBody")
-        if isinstance(request_body, dict):
-            for mime, media in (request_body.get("content") or {}).items():
-                if not _media_or_schema_has_example_v3_1(media):
-                    findings.append(
-                        Finding(
-                            rule_id=RULE_ID,
-                            severity=DEFAULT_SEVERITY,
-                            message=(
-                                f"Request body {mime} of {verb.upper()} {path} has no example."
-                            ),
-                            path=(
-                                f"{pointer}/requestBody/content/"
-                                f"{walker.encode_pointer_segment(mime)}"
-                            ),
-                            operation=f"{verb.upper()} {path}",
-                            suggestion=(
-                                "Add 'example'/'examples' on the mediaType, "
-                                "or 'example'/'examples' (array) on the schema."
-                            ),
-                        )
-                    )
-
-        for status, response in (op.get("responses") or {}).items():
-            if not _is_documented_response(status):
-                continue
-            if not isinstance(response, dict):
-                continue
-            for mime, media in (response.get("content") or {}).items():
-                if not _media_or_schema_has_example_v3_1(media):
-                    findings.append(
-                        Finding(
-                            rule_id=RULE_ID,
-                            severity=DEFAULT_SEVERITY,
-                            message=(
-                                f"Response {status} ({mime}) of {verb.upper()} "
-                                f"{path} has no example."
-                            ),
-                            path=(
-                                f"{pointer}/responses/{status}/content/"
-                                f"{walker.encode_pointer_segment(mime)}"
-                            ),
-                            operation=f"{verb.upper()} {path}",
-                            suggestion=(
-                                "Add 'example'/'examples' on the mediaType or "
-                                "on the schema (3.1 supports 'examples: [...]')."
-                            ),
-                        )
-                    )
+    for mime, media in walker.as_dict(request_body.get("content")).items():
+        if _has_example(media, allow_schema_examples_array):
+            continue
+        findings.append(
+            Finding(
+                rule_id=RULE_ID,
+                severity=DEFAULT_SEVERITY,
+                message=f"Request body {mime} of {ctx.label} has no example.",
+                path=(f"{ctx.pointer}/requestBody/content/{walker.encode_pointer_segment(mime)}"),
+                operation=ctx.label,
+                suggestion=suggestion,
+            )
+        )
     return findings
 
 
-def _media_or_schema_has_example_v3_0(media: Any) -> bool:
+def _response_findings(
+    ctx: OperationCtx,
+    walker: WalkerLike,
+    allow_schema_examples_array: bool,
+    suggestion: str,
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for status, response in walker.as_dict(ctx.op.get("responses")).items():
+        if not _is_documented_response(status) or not isinstance(response, dict):
+            continue
+        for mime, media in walker.as_dict(response.get("content")).items():
+            if _has_example(media, allow_schema_examples_array):
+                continue
+            findings.append(
+                Finding(
+                    rule_id=RULE_ID,
+                    severity=DEFAULT_SEVERITY,
+                    message=(f"Response {status} ({mime}) of {ctx.label} has no example."),
+                    path=(
+                        f"{ctx.pointer}/responses/{status}/content/"
+                        f"{walker.encode_pointer_segment(mime)}"
+                    ),
+                    operation=ctx.label,
+                    suggestion=suggestion,
+                )
+            )
+    return findings
+
+
+def _has_example(media: Any, allow_schema_examples_array: bool) -> bool:
+    """Return True if ``media`` (or its schema) documents at least one example."""
     if not isinstance(media, dict):
         return True  # nothing to check — don't false-positive
     if "example" in media or media.get("examples"):
         return True
     schema = media.get("schema") or {}
-    return "example" in schema
-
-
-def _media_or_schema_has_example_v3_1(media: Any) -> bool:
-    if not isinstance(media, dict):
-        return True
-    if "example" in media or media.get("examples"):
-        return True
-    schema = media.get("schema") or {}
     if "example" in schema:
         return True
-    schema_examples = schema.get("examples")
-    return isinstance(schema_examples, list) and len(schema_examples) > 0
+    if allow_schema_examples_array:
+        schema_examples = schema.get("examples")
+        return isinstance(schema_examples, list) and bool(schema_examples)
+    return False
+
+
+def _suggestion_text(allow_schema_examples_array: bool) -> str:
+    if allow_schema_examples_array:
+        return (
+            "Add 'example'/'examples' on the mediaType or "
+            "on the schema (3.1 supports 'examples: [...]')."
+        )
+    return "Add 'example'/'examples' on the mediaType or 'example' on the schema."

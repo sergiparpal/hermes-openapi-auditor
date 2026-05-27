@@ -7,29 +7,26 @@ rarely convey the operation's full intent.
 
 from __future__ import annotations
 
-from types import ModuleType
-
 from ..model import Finding, Severity, Spec
+from ..walker import WalkerLike
 
 RULE_ID = "missing-descriptions"
 DEFAULT_SEVERITY: Severity = "warning"
 
 
-def check(spec: Spec, walker: ModuleType) -> list[Finding]:
+def check(spec: Spec, walker: WalkerLike) -> list[Finding]:
     findings: list[Finding] = []
-    for path, verb, op, pointer in walker.iter_operations(spec):
-        summary = (op.get("summary") or "").strip()
-        description = (op.get("description") or "").strip()
+    for ctx in walker.iter_operations(spec):
+        summary = (ctx.op.get("summary") or "").strip()
+        description = (ctx.op.get("description") or "").strip()
         if not summary and not description:
             findings.append(
                 Finding(
                     rule_id=RULE_ID,
                     severity=DEFAULT_SEVERITY,
-                    message=(
-                        f"Operation {verb.upper()} {path} has neither 'summary' nor 'description'."
-                    ),
-                    path=pointer,
-                    operation=f"{verb.upper()} {path}",
+                    message=f"Operation {ctx.label} has neither 'summary' nor 'description'.",
+                    path=ctx.pointer,
+                    operation=ctx.label,
                     suggestion=(
                         "Add a one-line 'summary' (≤120 chars) and a longer "
                         "'description' explaining when an LLM should call this."

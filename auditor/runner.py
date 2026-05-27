@@ -8,23 +8,30 @@ the runner unit-testable without forcing every test to parse JSON.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+import dataclasses
+from typing import Any
 
 from . import rendering, walker
 from .loader import load_spec
-from .model import Finding, Severity, severity_rank
+from .model import (
+    DEFAULT_FORMAT,
+    DEFAULT_PROFILE,
+    DEFAULT_THRESHOLD,
+    Finding,
+    OutputFormat,
+    Severity,
+    severity_rank,
+)
 from .profiles import load_user_overrides, severity_for
 from .rules import REGISTRY
-
-OutputFormat = Literal["json", "markdown"]
 
 
 def audit_openapi_spec(
     *,
     path: str,
-    profile: str = "agent-consumed",
-    severity_threshold: Severity = "warning",
-    output_format: OutputFormat = "json",
+    profile: str = DEFAULT_PROFILE,
+    severity_threshold: Severity = DEFAULT_THRESHOLD,
+    output_format: OutputFormat = DEFAULT_FORMAT,
 ) -> dict[str, Any]:
     """Run the full audit pipeline against ``path``.
 
@@ -54,26 +61,9 @@ def audit_openapi_spec(
     for rule in REGISTRY:
         rule_findings = rule.check(spec, walker)
         rule_default = rule.DEFAULT_SEVERITY
-        rule_id = rule.RULE_ID
-        effective = severity_for(profile, rule_id, rule_default, overrides=overrides)
+        effective = severity_for(profile, rule.RULE_ID, rule_default, overrides=overrides)
         for f in rule_findings:
-            # Apply profile-level override only to findings that came in
-            # at the rule's default severity. A rule that pre-set a
-            # finding to a non-default severity (e.g. the 3.1 nuance in
-            # additional_properties) keeps its choice.
-            if f.severity == rule_default and f.severity != effective:
-                findings.append(
-                    Finding(
-                        rule_id=f.rule_id,
-                        severity=effective,
-                        message=f.message,
-                        path=f.path,
-                        operation=f.operation,
-                        suggestion=f.suggestion,
-                    )
-                )
-            else:
-                findings.append(f)
+            findings.append(_apply_profile_severity(f, rule_default, effective))
 
     threshold_rank = severity_rank(severity_threshold)
     findings = [f for f in findings if severity_rank(f.severity) >= threshold_rank]
@@ -92,3 +82,21 @@ def audit_openapi_spec(
         "source": spec.source,
         "findings": [f.to_dict() for f in findings],
     }
+
+
+def _apply_profile_severity(
+    finding: Finding,
+    rule_default: Severity,
+    effective: Severity,
+) -> Finding:
+    """Re-stamp severity onto findings that came in at the rule's default.
+
+    A rule may deliberately emit a finding off-default (e.g. the
+    ``additional_properties`` rule downgrades to ``info`` when the 3.1
+    schema also carries ``unevaluatedProperties``). That choice expresses
+    a contextual decision the rule made and must survive any profile-level
+    override.
+    """
+    if finding.severity == rule_default and finding.severity != effective:
+        return dataclasses.replace(finding, severity=effective)
+    return finding

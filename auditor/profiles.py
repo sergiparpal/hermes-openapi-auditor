@@ -18,12 +18,13 @@ from typing import Any
 
 import yaml
 
-from .model import Severity
+from .model import SEVERITY_LEVELS, ProfileName, Severity
 
 logger = logging.getLogger(__name__)
 
-ProfileName = str  # 'public' | 'internal' | 'agent-consumed' (open-ended)
-
+# ProfileName lives in model.py so schemas.py / tools.py / profiles.py share
+# the same enumeration. The user config may register additional profile
+# names at runtime — the mapping below is open-ended on its key type.
 PROFILES: dict[ProfileName, dict[str, Severity]] = {
     "public": {
         "missing-examples": "error",
@@ -52,11 +53,10 @@ def severity_for(
     rule's ``default``.
     """
     if overrides is not None:
-        profile_map = overrides.get(profile, {})
-        if rule_id in profile_map:
-            return profile_map[rule_id]
-    profile_map = PROFILES.get(profile, {})
-    return profile_map.get(rule_id, default)
+        override_map = overrides.get(profile, {})
+        if rule_id in override_map:
+            return override_map[rule_id]
+    return PROFILES.get(profile, {}).get(rule_id, default)
 
 
 def _user_config_path() -> Path:
@@ -86,54 +86,74 @@ def load_user_overrides() -> dict[ProfileName, dict[str, Severity]]:
     unexpected structure). Failures are logged at WARNING.
     """
     path = _user_config_path()
-    if not path.exists():
+    raw = _read_yaml(path)
+    if raw is None:
         return {}
+    return _parse_profiles_section(raw, path)
+
+
+def _read_yaml(path: Path) -> dict[str, Any] | None:
+    """Load ``path`` as YAML and return its top-level mapping, or ``None``.
+
+    ``None`` covers: file missing, OS read error, YAML parse error, and
+    a top level that isn't a mapping. All but "file missing" log a
+    warning so the user can debug.
+    """
+    if not path.exists():
+        return None
     try:
         text = path.read_text(encoding="utf-8")
         raw: Any = yaml.safe_load(text) or {}
     except (OSError, yaml.YAMLError) as e:
         logger.warning("could not read auditor config at %s: %s", path, e)
-        return {}
-
+        return None
     if not isinstance(raw, dict):
-        logger.warning("auditor config at %s must be a mapping; ignoring", path)
-        return {}
+        _warn(path, "must be a mapping; ignoring")
+        return None
+    return raw
 
+
+def _parse_profiles_section(
+    raw: dict[str, Any],
+    path: Path,
+) -> dict[ProfileName, dict[str, Severity]]:
     profiles_section = raw.get("profiles") or {}
     if not isinstance(profiles_section, dict):
-        logger.warning("auditor config at %s: 'profiles' must be a mapping; ignoring", path)
+        _warn(path, "'profiles' must be a mapping; ignoring")
         return {}
 
-    out: dict[ProfileName, dict[str, Severity]] = {}
-    for prof, rules in profiles_section.items():
+    overrides: dict[ProfileName, dict[str, Severity]] = {}
+    for profile, rules in profiles_section.items():
         if not isinstance(rules, dict):
-            logger.warning(
-                "auditor config at %s: profile %r entry must be a mapping; ignoring",
+            _warn(path, f"profile {profile!r} entry must be a mapping; ignoring")
+            continue
+        cleaned = _parse_profile_rules(rules, profile, path)
+        if cleaned:
+            overrides[profile] = cleaned
+    return overrides
+
+
+def _parse_profile_rules(
+    rules: dict[Any, Any],
+    profile: Any,
+    path: Path,
+) -> dict[str, Severity]:
+    cleaned: dict[str, Severity] = {}
+    for rule_id, severity in rules.items():
+        if not isinstance(rule_id, str):
+            _warn(path, f"non-string rule id {rule_id!r} under profile {profile!r}; ignoring")
+            continue
+        if severity not in SEVERITY_LEVELS:
+            _warn(
                 path,
-                prof,
+                f"invalid severity {severity!r} for {rule_id} under profile {profile!r} "
+                f"(expected one of {list(SEVERITY_LEVELS)}); ignoring",
             )
             continue
-        clean: dict[str, Severity] = {}
-        for rule_id, sev in rules.items():
-            if not isinstance(rule_id, str):
-                logger.warning(
-                    "auditor config at %s: non-string rule id %r under profile %r; ignoring",
-                    path,
-                    rule_id,
-                    prof,
-                )
-                continue
-            if sev not in {"info", "warning", "error"}:
-                logger.warning(
-                    "auditor config at %s: invalid severity %r for %s under profile %r "
-                    "(expected one of 'info', 'warning', 'error'); ignoring",
-                    path,
-                    sev,
-                    rule_id,
-                    prof,
-                )
-                continue
-            clean[rule_id] = sev
-        if clean:
-            out[prof] = clean
-    return out
+        cleaned[rule_id] = severity
+    return cleaned
+
+
+def _warn(path: Path, detail: str) -> None:
+    """Emit the standard ``auditor config at <path>: <detail>`` warning."""
+    logger.warning("auditor config at %s: %s", path, detail)

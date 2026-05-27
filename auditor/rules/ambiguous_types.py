@@ -16,15 +16,14 @@ Findings per version (per the plan):
 
 from __future__ import annotations
 
-from types import ModuleType
-
 from ..model import Finding, Severity, Spec
+from ..walker import WalkerLike
 
 RULE_ID = "ambiguous-types"
 DEFAULT_SEVERITY: Severity = "warning"
 
 
-def check(spec: Spec, walker: ModuleType) -> list[Finding]:
+def check(spec: Spec, walker: WalkerLike) -> list[Finding]:
     if spec.version == "2.0":
         return _check_v2(spec, walker)
     if spec.version == "3.0":
@@ -32,19 +31,17 @@ def check(spec: Spec, walker: ModuleType) -> list[Finding]:
     return _check_v3_1(spec, walker)
 
 
-def _check_v2(spec: Spec, walker: ModuleType) -> list[Finding]:
+def _check_v2(spec: Spec, walker: WalkerLike) -> list[Finding]:
     findings: list[Finding] = []
-    for path, verb, op, op_pointer in walker.iter_operations(spec):
-        for i, param in enumerate(op.get("parameters", [])):
+    for ctx in walker.iter_operations(spec):
+        for i, param in enumerate(walker.as_list(ctx.op.get("parameters"))):
             if not isinstance(param, dict):
                 continue
-            location = param.get("in")
-            if location == "body":
+            if param.get("in") == "body":
                 # Body params have their type in 'schema'; covered by the
                 # generic schema walk below.
                 continue
-            ptype = param.get("type")
-            if ptype != "string":
+            if param.get("type") != "string":
                 continue
             if param.get("format") or param.get("enum") or param.get("pattern"):
                 continue
@@ -54,11 +51,11 @@ def _check_v2(spec: Spec, walker: ModuleType) -> list[Finding]:
                     severity=DEFAULT_SEVERITY,
                     message=(
                         f"Parameter {param.get('name', '?')!r} of "
-                        f"{verb.upper()} {path} is a bare 'type: string' "
+                        f"{ctx.label} is a bare 'type: string' "
                         "with no format / enum / pattern."
                     ),
-                    path=f"{op_pointer}/parameters/{i}",
-                    operation=f"{verb.upper()} {path}",
+                    path=f"{ctx.pointer}/parameters/{i}",
+                    operation=ctx.label,
                     suggestion=(
                         "Constrain the string: add 'format' (e.g. 'uuid', "
                         "'date-time'), 'enum' (closed set), or 'pattern' "
@@ -69,7 +66,7 @@ def _check_v2(spec: Spec, walker: ModuleType) -> list[Finding]:
     return findings
 
 
-def _check_v3_0(spec: Spec, walker: ModuleType) -> list[Finding]:
+def _check_v3_0(spec: Spec, walker: WalkerLike) -> list[Finding]:
     findings: list[Finding] = []
     for schema, pointer in walker.iter_all_schemas(spec):
         if schema.get("nullable") is True and not schema.get("type"):
@@ -87,15 +84,15 @@ def _check_v3_0(spec: Spec, walker: ModuleType) -> list[Finding]:
                     suggestion="Add an explicit 'type' alongside 'nullable: true'.",
                 )
             )
-        for kw in ("oneOf", "anyOf"):
-            variants = schema.get(kw)
+        for keyword in ("oneOf", "anyOf"):
+            variants = schema.get(keyword)
             if isinstance(variants, list) and len(variants) > 1 and "discriminator" not in schema:
                 findings.append(
                     Finding(
                         rule_id=RULE_ID,
                         severity=DEFAULT_SEVERITY,
                         message=(
-                            f"Schema at {pointer} uses '{kw}' with "
+                            f"Schema at {pointer} uses '{keyword}' with "
                             f"{len(variants)} variants but no 'discriminator' "
                             "— LLMs cannot tell which variant to produce."
                         ),
@@ -111,7 +108,7 @@ def _check_v3_0(spec: Spec, walker: ModuleType) -> list[Finding]:
     return findings
 
 
-def _check_v3_1(spec: Spec, walker: ModuleType) -> list[Finding]:
+def _check_v3_1(spec: Spec, walker: WalkerLike) -> list[Finding]:
     findings: list[Finding] = []
     for schema, pointer in walker.iter_all_schemas(spec):
         if schema.get("nullable") is True:
@@ -131,8 +128,8 @@ def _check_v3_1(spec: Spec, walker: ModuleType) -> list[Finding]:
                     ),
                 )
             )
-        for kw in ("exclusiveMinimum", "exclusiveMaximum"):
-            value = schema.get(kw)
+        for keyword in ("exclusiveMinimum", "exclusiveMaximum"):
+            value = schema.get(keyword)
             if isinstance(value, bool):
                 # Important: bool is a subclass of int in Python — check bool
                 # FIRST so True/False isn't accidentally treated as numeric.
@@ -141,14 +138,14 @@ def _check_v3_1(spec: Spec, walker: ModuleType) -> list[Finding]:
                         rule_id=RULE_ID,
                         severity=DEFAULT_SEVERITY,
                         message=(
-                            f"Schema at {pointer} has '{kw}: {value}' as a "
+                            f"Schema at {pointer} has '{keyword}: {value}' as a "
                             "boolean — 3.1 (JSON Schema 2020-12) requires a "
                             "number here."
                         ),
                         path=pointer,
                         operation=None,
                         suggestion=(
-                            f"Move the bound numeric value into '{kw}' "
+                            f"Move the bound numeric value into '{keyword}' "
                             "directly (e.g. 'exclusiveMinimum: 0')."
                         ),
                     )
