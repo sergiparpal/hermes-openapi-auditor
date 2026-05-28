@@ -18,17 +18,10 @@ from __future__ import annotations
 
 from ..model import Finding, Severity, Spec
 from ..walker import WalkerLike
+from ._dispatch import by_version
 
 RULE_ID = "ambiguous-types"
 DEFAULT_SEVERITY: Severity = "warning"
-
-
-def check(spec: Spec, walker: WalkerLike) -> list[Finding]:
-    if spec.version == "2.0":
-        return _check_v2(spec, walker)
-    if spec.version == "3.0":
-        return _check_v3_0(spec, walker)
-    return _check_v3_1(spec, walker)
 
 
 def _check_v2(spec: Spec, walker: WalkerLike) -> list[Finding]:
@@ -151,3 +144,12 @@ def _check_v3_1(spec: Spec, walker: WalkerLike) -> list[Finding]:
                     )
                 )
     return findings
+
+
+check = by_version(
+    {
+        "2.0": _check_v2,
+        "3.0": _check_v3_0,
+        "3.1": _check_v3_1,
+    }
+)

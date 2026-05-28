@@ -1,15 +1,25 @@
-"""Markdown rendering for audit findings.
+"""Output formatting for audit findings.
 
-The renderer is intentionally simple: a short header with the spec
-source and version, followed by a table-of-findings grouped by
-operation (or by schema for operation-level-less findings). The
-renderer assumes ``findings`` is already sorted by the runner (severity
-desc, rule_id, path) — preserve that order within each group.
+Each output format is a small callable that turns ``(findings, spec)``
+into the dict returned by the runner. The runner does not know which
+formats exist — it just looks up the requested key in :data:`RENDERERS`.
+Adding a format (e.g. SARIF, HTML) is a new callable plus one line in
+:data:`RENDERERS`; the runner is closed for modification.
+
+The markdown renderer's body lives in :func:`to_markdown` so callers
+that want only the rendered string (without the JSON envelope) can use
+it directly.
 """
 
 from __future__ import annotations
 
-from .model import Finding, Severity, Spec
+from collections.abc import Callable
+from typing import Any
+
+from .model import OUTPUT_FORMATS, Finding, OutputFormat, Severity, Spec
+
+Renderer = Callable[[list[Finding], Spec], dict[str, Any]]
+"""The output-format strategy type. Returns a JSON-serialisable envelope."""
 
 _SEVERITY_LABEL: dict[Severity, str] = {
     "error": "ERROR",
@@ -59,3 +69,34 @@ def to_markdown(findings: list[Finding], spec: Spec) -> str:
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_json(findings: list[Finding], spec: Spec) -> dict[str, Any]:
+    return {
+        "version": spec.version,
+        "source": spec.source,
+        "findings": [f.to_dict() for f in findings],
+    }
+
+
+def _render_markdown(findings: list[Finding], spec: Spec) -> dict[str, Any]:
+    return {
+        "version": spec.version,
+        "source": spec.source,
+        "markdown": to_markdown(findings, spec),
+    }
+
+
+RENDERERS: dict[OutputFormat, Renderer] = {
+    "json": _render_json,
+    "markdown": _render_markdown,
+}
+"""Map of supported output formats to their renderer callables.
+
+Kept in sync with :data:`auditor.model.OUTPUT_FORMATS` by the assertion
+below: a missing or extra key fails fast at import time.
+"""
+
+assert set(RENDERERS) == set(OUTPUT_FORMATS), (
+    f"RENDERERS keys {sorted(RENDERERS)} do not match OUTPUT_FORMATS {sorted(OUTPUT_FORMATS)}"
+)

@@ -20,15 +20,10 @@ from typing import Any
 
 from ..model import Finding, Severity, Spec
 from ..walker import OperationCtx, WalkerLike
+from ._dispatch import by_version
 
 RULE_ID = "missing-examples"
 DEFAULT_SEVERITY: Severity = "warning"
-
-
-def check(spec: Spec, walker: WalkerLike) -> list[Finding]:
-    if spec.version == "2.0":
-        return _check_v2(spec, walker)
-    return _check_v3(spec, walker, allow_schema_examples_array=spec.version == "3.1")
 
 
 def _is_documented_response(status: str) -> bool:
@@ -191,3 +186,20 @@ def _suggestion_text(allow_schema_examples_array: bool) -> str:
             "on the schema (3.1 supports 'examples: [...]')."
         )
     return "Add 'example'/'examples' on the mediaType or 'example' on the schema."
+
+
+def _check_v3_0(spec: Spec, walker: WalkerLike) -> list[Finding]:
+    return _check_v3(spec, walker, allow_schema_examples_array=False)
+
+
+def _check_v3_1(spec: Spec, walker: WalkerLike) -> list[Finding]:
+    return _check_v3(spec, walker, allow_schema_examples_array=True)
+
+
+check = by_version(
+    {
+        "2.0": _check_v2,
+        "3.0": _check_v3_0,
+        "3.1": _check_v3_1,
+    }
+)

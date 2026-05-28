@@ -41,9 +41,12 @@ def check(spec: Spec, walker: WalkerLike) -> list[Finding]:
             continue
 
         severity: Severity = DEFAULT_SEVERITY
+        severity_pinned = False
         if spec.version == "3.1" and "unevaluatedProperties" in schema:
-            # Author has explicitly addressed open-ended composition.
+            # Author has explicitly addressed open-ended composition;
+            # pin the severity so a profile override cannot escalate it.
             severity = "info"
+            severity_pinned = True
 
         findings.append(
             Finding(
@@ -61,6 +64,7 @@ def check(spec: Spec, walker: WalkerLike) -> list[Finding]:
                     "or specify a value schema (e.g. 'additionalProperties: "
                     "{type: string}')."
                 ),
+                severity_pinned=severity_pinned,
             )
         )
     return findings

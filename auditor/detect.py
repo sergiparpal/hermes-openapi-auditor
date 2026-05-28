@@ -28,9 +28,6 @@ def detect_version(spec: dict[str, Any]) -> Version:
     swagger = spec.get("swagger")
     openapi = spec.get("openapi")
 
-    # NOTE: ``loader._reject_frankenstein`` also flags this case, with a
-    # path-rich error before this function is reached. The duplicated
-    # check here keeps ``detect_version`` usable in isolation.
     if swagger is not None and openapi is not None:
         raise InvalidSpecError("spec declares both 'swagger' and 'openapi' fields; pick one")
 

@@ -54,6 +54,11 @@ def severity_rank(level: Severity) -> int:
     return _SEVERITY_ORDER[level]
 
 
+# Fields that are internal book-keeping and must not leak into the JSON
+# output payload. See :attr:`Finding.severity_pinned`.
+_INTERNAL_FIELDS: frozenset[str] = frozenset({"severity_pinned"})
+
+
 @dataclass(frozen=True, slots=True)
 class Finding:
     """A single audit finding.
@@ -61,6 +66,12 @@ class Finding:
     Findings are produced by rules and consumed by the runner. They are
     immutable so a rule can't accidentally mutate a finding already
     appended to another list.
+
+    ``severity_pinned`` marks findings whose severity was a deliberate
+    per-finding decision by the rule (e.g. the ``additional_properties``
+    rule downgrades to ``info`` when ``unevaluatedProperties`` is also
+    set). Pinned severities survive profile overrides; the field is
+    not part of the public output payload.
     """
 
     rule_id: str
@@ -69,15 +80,21 @@ class Finding:
     path: str
     operation: str | None = None
     suggestion: str | None = None
+    severity_pinned: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """Serializable representation used in the JSON output payload.
 
         Optional fields (``operation``, ``suggestion``) are omitted when
-        ``None`` to keep the payload tight. Field order matches the
-        dataclass declaration order.
+        ``None`` to keep the payload tight. Internal book-keeping fields
+        (``severity_pinned``) are always excluded. Field order matches
+        the dataclass declaration order.
         """
-        return {k: v for k, v in dataclasses.asdict(self).items() if v is not None}
+        return {
+            k: v
+            for k, v in dataclasses.asdict(self).items()
+            if v is not None and k not in _INTERNAL_FIELDS
+        }
 
 
 @dataclass(slots=True)

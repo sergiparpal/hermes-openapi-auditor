@@ -11,7 +11,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
-from . import rendering, walker
+from . import walker
 from .loader import load_spec
 from .model import (
     DEFAULT_FORMAT,
@@ -19,10 +19,12 @@ from .model import (
     DEFAULT_THRESHOLD,
     Finding,
     OutputFormat,
+    ProfileName,
     Severity,
     severity_rank,
 )
 from .profiles import load_user_overrides, severity_for
+from .rendering import RENDERERS
 from .rules import REGISTRY
 
 
@@ -32,6 +34,7 @@ def audit_openapi_spec(
     profile: str = DEFAULT_PROFILE,
     severity_threshold: Severity = DEFAULT_THRESHOLD,
     output_format: OutputFormat = DEFAULT_FORMAT,
+    user_overrides: dict[ProfileName, dict[str, Severity]] | None = None,
 ) -> dict[str, Any]:
     """Run the full audit pipeline against ``path``.
 
@@ -44,6 +47,12 @@ def audit_openapi_spec(
         severity_threshold: Findings below this level are filtered out.
         output_format: ``json`` returns a structured list; ``markdown``
             wraps a rendered string in a JSON-compatible envelope.
+        user_overrides: Caller-supplied per-rule severity overrides.
+            When ``None`` (the default), the runner loads the user
+            config from disk via :func:`load_user_overrides`. Pass an
+            explicit mapping (including ``{}``) to bypass disk I/O —
+            useful in tests and for callers that already hold parsed
+            config.
 
     Returns:
         A dict ready for ``json.dumps``. On success, contains
@@ -55,48 +64,31 @@ def audit_openapi_spec(
     # rather than a hard validation error.
     spec = load_spec(path, validate_schema=False)
 
-    overrides = load_user_overrides()
+    overrides = load_user_overrides() if user_overrides is None else user_overrides
 
     findings: list[Finding] = []
     for rule in REGISTRY:
         rule_findings = rule.check(spec, walker)
-        rule_default = rule.DEFAULT_SEVERITY
-        effective = severity_for(profile, rule.RULE_ID, rule_default, overrides=overrides)
+        effective = severity_for(profile, rule.RULE_ID, rule.DEFAULT_SEVERITY, overrides=overrides)
         for f in rule_findings:
-            findings.append(_apply_profile_severity(f, rule_default, effective))
+            findings.append(_apply_profile_severity(f, effective))
 
     threshold_rank = severity_rank(severity_threshold)
     findings = [f for f in findings if severity_rank(f.severity) >= threshold_rank]
 
     findings.sort(key=lambda f: (-severity_rank(f.severity), f.rule_id, f.path))
 
-    if output_format == "markdown":
-        return {
-            "version": spec.version,
-            "source": spec.source,
-            "markdown": rendering.to_markdown(findings, spec),
-        }
-
-    return {
-        "version": spec.version,
-        "source": spec.source,
-        "findings": [f.to_dict() for f in findings],
-    }
+    return RENDERERS[output_format](findings, spec)
 
 
-def _apply_profile_severity(
-    finding: Finding,
-    rule_default: Severity,
-    effective: Severity,
-) -> Finding:
-    """Re-stamp severity onto findings that came in at the rule's default.
+def _apply_profile_severity(finding: Finding, effective: Severity) -> Finding:
+    """Re-stamp ``finding.severity`` to the profile-effective level.
 
-    A rule may deliberately emit a finding off-default (e.g. the
-    ``additional_properties`` rule downgrades to ``info`` when the 3.1
-    schema also carries ``unevaluatedProperties``). That choice expresses
-    a contextual decision the rule made and must survive any profile-level
-    override.
+    Findings flagged ``severity_pinned`` are left alone: the rule has
+    expressed a contextual decision (e.g. ``additional_properties``
+    downgrades to ``info`` when ``unevaluatedProperties`` is set) and
+    that choice must survive any profile-level override.
     """
-    if finding.severity == rule_default and finding.severity != effective:
-        return dataclasses.replace(finding, severity=effective)
-    return finding
+    if finding.severity_pinned or finding.severity == effective:
+        return finding
+    return dataclasses.replace(finding, severity=effective)

@@ -94,8 +94,12 @@ def load_spec(
             f"spec root must be a mapping, got {type(data).__name__} at {spec_path}"
         )
 
-    _reject_frankenstein(data, spec_path)
-    version = detect_version(data)
+    try:
+        version = detect_version(data)
+    except InvalidSpecError as e:
+        # Re-raise with file context so the user sees which spec failed.
+        raise InvalidSpecError(f"spec at {spec_path}: {e}") from e
+    _reject_frankenstein(data, spec_path, version)
 
     # Validate against the matching meta-schema. We pick an explicit
     # validator class so we get a clearer error if detect_version and the
@@ -122,27 +126,21 @@ def load_spec(
     return Spec(version=version, data=data, source=str(spec_path))
 
 
-def _reject_frankenstein(data: dict[str, Any], path: Path) -> None:
-    """Detect specs that mix mutually exclusive version markers.
+def _reject_frankenstein(data: dict[str, Any], path: Path, version: Version) -> None:
+    """Reject specs that mix structural fields incompatible with their version.
 
-    A 2.0 spec must not carry 3.x-only structural fields, and vice-versa.
-    These rules don't catch every malformed spec — the meta-schema
-    validator does the rest — but they produce clearer error messages.
+    The both-discriminators case is handled by :func:`detect_version`;
+    by the time we get here we already know which version this spec
+    claims to be, so we only need to flag fields that belong to the
+    *other* major. The meta-schema validator would catch these too, but
+    a targeted message helps the user.
     """
-    has_swagger = "swagger" in data
-    has_openapi = "openapi" in data
-
-    if has_swagger and has_openapi:
-        raise InvalidSpecError(f"spec at {path} declares both 'swagger' and 'openapi' fields")
-
-    if has_swagger and "components" in data:
+    if version == "2.0" and "components" in data:
         raise InvalidSpecError(
             f"spec at {path} declares swagger: '2.0' but uses the 3.x-only 'components' object"
         )
 
-    if has_openapi and "definitions" in data and "components" not in data:
-        # 'definitions' is 2.0-only; the validator catches this, but a
-        # targeted message helps the user.
+    if version != "2.0" and "definitions" in data and "components" not in data:
         raise InvalidSpecError(
             f"spec at {path} declares openapi 3.x but uses the 2.0-only 'definitions' object"
         )
