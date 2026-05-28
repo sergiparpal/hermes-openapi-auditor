@@ -216,11 +216,11 @@ hermes-openapi-auditor/
 │   ├── detect.py            # version detection
 │   ├── loader.py            # parse + validate + ref-resolve
 │   ├── model.py             # Finding / Spec / Severity / Version
-│   ├── walker.py            # version-agnostic iterators
+│   ├── walker/              # version-agnostic iterators (operations + schemas)
 │   ├── runner.py            # orchestration
 │   ├── profiles.py          # severity overrides
 │   ├── rendering.py         # markdown output
-│   └── rules/               # one file per rule
+│   └── rules/               # one file per rule (+ _dispatch.py for by-version branching)
 └── tests/                   # pytest, with Petstore fixtures
 ```
 
